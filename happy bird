@@ -1,0 +1,177 @@
+const config = {
+    type: Phaser.AUTO,
+    width: 800,
+    height: 600,
+    physics: {
+        default: 'matter',
+        matter: {
+            gravity: { y: 1 },
+            debug: false
+        }
+    },
+    scene: [Level1, Level2, Level3]
+};
+
+const game = new Phaser.Game(config);
+
+class BaseLevel extends Phaser.Scene {
+    constructor(levelKey, nextLevel) {
+        super(levelKey);
+        this.nextLevel = nextLevel;
+    }
+
+    preload() {
+        this.load.image('background', 'assets/background.png');
+        this.load.image('bird_red', 'assets/bird_red.png');
+        this.load.image('bird_blue', 'assets/bird_blue.png');
+        this.load.image('bird_black', 'assets/bird_black.png');
+        this.load.image('pig', 'assets/pig.png');
+        this.load.image('sling', 'assets/sling.png');
+        this.load.image('wood', 'assets/wood.png');
+        this.load.image('tnt', 'assets/tnt.png');
+        this.load.image('explode', 'assets/explode.png');
+        this.load.audio('launch', 'assets/launch.mp3');
+        this.load.audio('hit', 'assets/hit.mp3');
+        this.load.audio('explosion', 'assets/explosion.mp3');
+    }
+
+    create() {
+        this.add.image(400, 300, 'background');
+        this.sling = this.add.image(150, 450, 'sling').setDepth(1);
+        
+        this.birdTypes = ['bird_red', 'bird_blue', 'bird_black'];
+        this.birdIndex = 0;
+        this.createBird();
+        
+        this.pig = this.matter.add.image(600, 500, 'pig').setCircle().setStatic(true);
+        this.wood = this.matter.add.image(620, 450, 'wood').setStatic(false);
+        this.tnt = this.matter.add.image(650, 500, 'tnt').setStatic(true);
+        this.launchSound = this.sound.add('launch');
+        this.hitSound = this.sound.add('hit');
+        this.explosionSound = this.sound.add('explosion');
+
+        this.isDragging = false;
+        this.startX = 150;
+        this.startY = 450;
+        this.score = 0;
+        this.scoreText = this.add.text(10, 10, 'Score: 0', { fontSize: '20px', fill: '#000' });
+
+        this.input.on('pointerdown', (pointer) => {
+            if (Phaser.Geom.Circle.Contains(this.bird.getBounds(), pointer.x, pointer.y)) {
+                this.isDragging = true;
+            }
+        });
+
+        this.input.on('pointermove', (pointer) => {
+            if (this.isDragging) {
+                this.bird.setPosition(pointer.x, pointer.y);
+            }
+        });
+
+        this.input.on('pointerup', (pointer) => {
+            if (this.isDragging) {
+                this.isDragging = false;
+                let velocityX = (this.startX - pointer.x) * 0.2;
+                let velocityY = (this.startY - pointer.y) * 0.2;
+                this.bird.setVelocity(velocityX, velocityY);
+                this.launchSound.play();
+            }
+        });
+
+        this.matter.world.on('collisionstart', (event) => {
+            event.pairs.forEach((pair) => {
+                if (pair.bodyA.gameObject === this.bird || pair.bodyB.gameObject === this.bird) {
+                    this.handleBirdCollision(pair.bodyA.gameObject, pair.bodyB.gameObject);
+                }
+            });
+        });
+    }
+
+    createBird() {
+        this.bird = this.matter.add.image(150, 450, this.birdTypes[this.birdIndex])
+            .setCircle()
+            .setBounce(0.5)
+            .setInteractive();
+    }
+
+    handleBirdCollision(obj1, obj2) {
+        if (obj1 === this.pig || obj2 === this.pig) {
+            this.score += 50;
+            this.hitSound.play();
+            this.pig.setTexture('explode');
+            setTimeout(() => {
+                this.pig.destroy();
+                this.scoreText.setText(`Score: ${this.score}`);
+                this.nextTurn();
+            }, 500);
+        }
+
+        if (obj1 === this.tnt || obj2 === this.tnt) {
+            this.score += 100;
+            this.explosionSound.play();
+            this.tnt.setTexture('explode');
+            setTimeout(() => {
+                this.tnt.destroy();
+                this.scoreText.setText(`Score: ${this.score}`);
+            }, 500);
+        }
+
+        if (this.bird.texture.key === 'bird_blue') {
+            this.splitBird();
+        } else if (this.bird.texture.key === 'bird_black') {
+            this.explodeBird();
+        }
+    }
+
+    splitBird() {
+        let clones = [];
+        for (let i = -1; i <= 1; i++) {
+            let clone = this.matter.add.image(this.bird.x, this.bird.y, 'bird_blue')
+                .setCircle()
+                .setBounce(0.5);
+            clone.setVelocity(this.bird.body.velocity.x + i, this.bird.body.velocity.y - i);
+            clones.push(clone);
+        }
+    }
+
+    explodeBird() {
+        this.explosionSound.play();
+        let explosionRadius = 100;
+        let bodies = this.matter.world.localWorld.bodies;
+        for (let body of bodies) {
+            let obj = body.gameObject;
+            if (obj && obj !== this.bird && Phaser.Math.Distance.Between(obj.x, obj.y, this.bird.x, this.bird.y) < explosionRadius) {
+                obj.setVelocity((obj.x - this.bird.x) * 0.1, (obj.y - this.bird.y) * 0.1);
+            }
+        }
+        this.bird.destroy();
+    }
+
+    nextTurn() {
+        this.bird.destroy();
+        this.birdIndex++;
+        if (this.birdIndex < this.birdTypes.length) {
+            this.createBird();
+        } else {
+            this.scene.start(this.nextLevel);
+        }
+    }
+}
+
+class Level1 extends BaseLevel {
+    constructor() {
+        super('Level1', 'Level2');
+    }
+}
+
+class Level2 extends BaseLevel {
+    constructor() {
+        super('Level2', 'Level3');
+    }
+}
+
+class Level3 extends BaseLevel {
+    constructor() {
+        super('Level3', null);
+    }
+}
